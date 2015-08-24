@@ -40,7 +40,6 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="ParameterNameSettings.cs" />
     <Compile Include="Sproc.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>

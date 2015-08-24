@@ -10,71 +10,52 @@ namespace SprocIt
 {
 	public class Sproc
 	{
+
 		public string ConnectionString { get; set; }
 
-		public string StoredProcedure { get; set; }
+        public string StoredProcedure { get; set; }
 
-		public List<SqlParameter> SqlParameters { get; set; }
-
-		public ParameterNameSettings ParameterNameSettings { get; set; }
-
-
-		public Sproc Initialize()
+		private List<SqlParameter> SqlParameters_;
+        public List<SqlParameter> SqlParameters
 		{
-			if (SqlParameters == null)
-				SqlParameters = new List<SqlParameter>();
+			get
+			{
+				return SqlParameters_ ?? (SqlParameters_ = new List<SqlParameter>());
+			}
 
-			if (ParameterNameSettings == null)
-				ParameterNameSettings = new ParameterNameSettings();
-
-			return this;
+			set
+			{
+				SqlParameters_ = value;
+			}
 		}
 
-
-		public Sproc Transform()
+		// Transforms are not being applied yet.
+		private static Func<string, string> DefaultParameterNameTransform = parameterName => parameterName;
+        private Func<string, string> TransformParameterName_;
+        public Func<string, string> TransformParameterName
 		{
-			ParameterNameSettings.ShouldTransformParameterName = true;
-			return this;
-		}
+			get
+			{
+				return TransformParameterName_ ?? DefaultParameterNameTransform;
+			}
 
-
-		public Sproc Prefix()
-		{
-			ParameterNameSettings.ShouldPrefixParameterName = true;
-			return this;
-		}
-
-
-		private string ConditionallyPrefixParameterName(string parameterName)
-		{
-			return ParameterNameSettings.ShouldPrefixParameterName ? ParameterNameSettings.ParameterNamePrefix + parameterName : parameterName;
-		}
-
-
-		private string ConditionallyTransformParameterName(string parameterName)
-		{
-			return ParameterNameSettings.ShouldTransformParameterName ? ParameterNameSettings.TransformParameterName(parameterName) : parameterName;
-		}
-
-
-		private string ConditionallyAlterParameterName(string parameterName)
-		{
-			return ParameterNameSettings.ShouldTransformParameterNameBeforePrefixing ?
-				ConditionallyPrefixParameterName(ConditionallyTransformParameterName(parameterName)) :
-				ConditionallyTransformParameterName(ConditionallyPrefixParameterName(parameterName));
+			set
+			{
+				TransformParameterName_ = value;
+			}
 		}
 
 
 		public Sproc In(string parameterName, object value)
 		{
-			SqlParameters.Add(new SqlParameter(ConditionallyAlterParameterName(parameterName), value));
+			SqlParameters.Add(new SqlParameter(parameterName, value));
 			return this;
 		}
 
 
 		public Sproc Out(string parameterName, object value)
 		{
-			SqlParameters.Add(new SqlParameter(ConditionallyAlterParameterName(parameterName), value) { Direction = System.Data.ParameterDirection.Output });
+			SqlParameters.Add(new SqlParameter(parameterName, value) { Direction = ParameterDirection.Output });
 			return this;
 		}
 
@@ -86,47 +67,50 @@ namespace SprocIt
 		}
 
 
-		private void AddSqlParametersToSqlCommand(SqlCommand sqlCommand)
+		private T Use<T>(Func<SqlCommand, T> func)
 		{
-			if (SqlParameters != null)
-				SqlParameters.ForEach(sqlParameter => sqlCommand.Parameters.Add(sqlParameter));
-		}
-
-
-		public DataSet GetDataSet(string pattern = null, string replacement = null)
-		{
-			DataSet dataSet = new DataSet();
-
 			using (var sqlConnection = new SqlConnection(ConnectionString))
 			using (var sqlCommand = new SqlCommand(StoredProcedure, sqlConnection) { CommandType = CommandType.StoredProcedure })
 			{
+				SqlParameters.ForEach(sqlParameter => sqlCommand.Parameters.Add(sqlParameter));
+				sqlConnection.Open();
+				return func(sqlCommand);
+			}
+		}
 
-				AddSqlParametersToSqlCommand(sqlCommand);
 
+		public int NonQuery()
+		{
+			return Use(sqlCommand => sqlCommand.ExecuteNonQuery());
+		}
+
+
+		public object GetScalar()
+		{
+			return Use(sqlCommand => sqlCommand.ExecuteScalar());
+		}
+
+
+		public DataSet GetDataSet()
+		{
+			return Use(sqlCommand =>
+			{
 				using (var sqlDataAdapter = new SqlDataAdapter(sqlCommand))
 				{
-					sqlConnection.Open();
+					DataSet dataSet = new DataSet();
 					sqlDataAdapter.Fill(dataSet);
+					return dataSet;
 				}
-			}
-
-			return dataSet;
+			});
 		}
 
 
-
-		public IEnumerable<SqlParameter> GetOutputParameters(string pattern = null, string replacement = null)
+		public IEnumerable<SqlParameter> GetOutputParameters()
 		{
-			using (var sqlConnection = new SqlConnection(ConnectionString))
-			using (var sqlCommand = new SqlCommand(StoredProcedure, sqlConnection) { CommandType = CommandType.StoredProcedure })
-			{
-				AddSqlParametersToSqlCommand(sqlCommand);
-				sqlConnection.Open();
-				sqlCommand.ExecuteNonQuery();
-			}
-
+			Use(sqlCommand => sqlCommand.ExecuteNonQuery());
 			return SqlParameters.Where(sqlParameter => sqlParameter.Direction == ParameterDirection.Output || sqlParameter.Direction == ParameterDirection.InputOutput);
 		}
+
 
 	}
 }
